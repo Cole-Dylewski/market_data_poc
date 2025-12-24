@@ -6,7 +6,8 @@ error handling decorators, retry logic, and data validation helpers.
 """
 
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta, time, date
+import time as time_module
 import requests
 from bs4 import BeautifulSoup
 
@@ -157,21 +158,67 @@ def _is_valid_symbol(symbol: str) -> bool:
     return True
 
 
+def get_last_trading_day(reference_date: Optional[date] = None) -> date:
+    """Get the last complete trading day (weekday) before the reference date.
+    
+    US stock markets are closed on weekends. This function finds the most recent
+    weekday (Monday-Friday) before the reference date. Always goes back at least
+    one day from the reference date to ensure we get a complete trading day.
+    If reference_date is None, uses today's date.
+    
+    Note: This does not account for market holidays. For production use, consider
+    integrating with a holiday calendar library.
+    
+    Args:
+        reference_date: Date to start from. If None, uses today. Always returns
+            a date before this reference date.
+    
+    Returns:
+        The last complete trading day (weekday) date before the reference date
+    
+    Examples:
+        >>> from datetime import date
+        >>> # If today is Monday, returns Friday (last complete trading day)
+        >>> last_day = get_last_trading_day()
+        >>> last_day.weekday() < 5  # Monday=0, Friday=4
+        True
+    """
+    if reference_date is None:
+        reference_date = datetime.now().date()
+    
+    # Start from the day before the reference date
+    # This ensures we get a complete trading day, not today's partial day
+    current_date = reference_date - timedelta(days=1)
+    max_days_back = 7  # Safety limit
+    
+    # Go back day by day until we find a weekday (Monday=0, Friday=4)
+    for _ in range(max_days_back):
+        # weekday() returns 0=Monday, 6=Sunday
+        # We want Monday (0) through Friday (4)
+        if current_date.weekday() < 5:  # Monday through Friday
+            return current_date
+        current_date = current_date - timedelta(days=1)
+    
+    # Fallback (shouldn't reach here)
+    return current_date
+
+
 def fetch_previous_day_5min_bars(
     symbols: List[str],
     client: Optional[YahooFinanceClient] = None,
     date: Optional[datetime] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """Fetch previous day's 5-minute bar data for a list of symbols.
+    """Fetch last trading day's 5-minute bar data for a list of symbols.
     
-    Retrieves intraday data in 5-minute intervals for the previous trading day
-    (or specified date) for all provided symbols. Market hours are assumed to be
-    9:30 AM to 4:00 PM ET.
+    Retrieves intraday data in 5-minute intervals for the last full trading day
+    (or specified date) for all provided symbols. Automatically finds the most
+    recent weekday (skips weekends). Market hours are assumed to be 9:30 AM to
+    4:00 PM ET.
     
     Args:
         symbols: List of stock symbols to fetch data for
         client: Optional YahooFinanceClient instance. If None, creates a new one.
-        date: Optional specific date to fetch. If None, uses yesterday.
+        date: Optional specific date to fetch. If None, finds the last trading day.
     
     Returns:
         Dictionary mapping symbol to list of bar dictionaries. Each bar contains:
@@ -205,8 +252,19 @@ def fetch_previous_day_5min_bars(
     
     # Determine the date to fetch
     if date is None:
-        # Use yesterday (previous day)
-        target_date = datetime.now().date() - timedelta(days=1)
+        # Find the last trading day (skips weekends)
+        # Go back at least 2-3 trading days to ensure data is available
+        # (Yahoo Finance may have delays and rate limiting issues with very recent dates)
+        last_trading_day = get_last_trading_day()
+        today = datetime.now().date()
+        
+        # If the last trading day is very recent (within 2 days), go back further
+        # This helps avoid rate limiting and ensures data availability
+        if last_trading_day >= today - timedelta(days=2):
+            # Go back 3 more trading days to ensure data is available
+            target_date = get_last_trading_day(last_trading_day - timedelta(days=3))
+        else:
+            target_date = last_trading_day
     else:
         target_date = date.date() if isinstance(date, datetime) else date
     
@@ -217,8 +275,15 @@ def fetch_previous_day_5min_bars(
     
     results: Dict[str, List[Dict[str, Any]]] = {}
     
-    for symbol in symbols:
+    print(f"Fetching full trading day data (9:30 AM - 4:00 PM) for {len(symbols)} symbols...")
+    print(f"Target date: {target_date}")
+    print(f"Each symbol requires 1 API request for the full day's 5-minute bars\n")
+    
+    for i, symbol in enumerate(symbols):
         try:
+            # Single request per symbol to get the full day's 5-minute bars
+            # This is more efficient than multiple requests per symbol
+            print(f"[{i+1}/{len(symbols)}] Fetching {symbol}...", end=" ", flush=True)
             bars = client.fetch_bars(
                 symbol=symbol,
                 start_time=market_open,
@@ -226,11 +291,48 @@ def fetch_previous_day_5min_bars(
                 interval="5m",
             )
             results[symbol] = bars
+            print(f"✓ Got {len(bars)} bars")
+            
+            # Add delay between symbols to avoid rate limiting
+            # Only delay if not the last symbol
+            if i < len(symbols) - 1:
+                delay = 3.0  # 3 second delay between symbols
+                time_module.sleep(delay)
+                
         except (ValueError, ConnectionError) as e:
             # Log error but continue with other symbols
-            # In production, you might want to use proper logging
+            error_msg = str(e)
+            if "429" in error_msg or "rate limit" in error_msg.lower() or "too many" in error_msg.lower():
+                # If rate limited, wait longer before continuing
+                wait_time = 15.0  # Wait 15 seconds on rate limit
+                print(f"✗ Rate limited")
+                print(f"  Waiting {wait_time} seconds before retrying {symbol}...")
+                time_module.sleep(wait_time)
+                # Try once more after waiting
+                try:
+                    bars = client.fetch_bars(
+                        symbol=symbol,
+                        start_time=market_open,
+                        end_time=market_close,
+                        interval="5m",
+                    )
+                    results[symbol] = bars
+                    print(f"✓ Retry successful - Got {len(bars)} bars")
+                    # Still add delay before next symbol
+                    if i < len(symbols) - 1:
+                        time_module.sleep(3.0)
+                    continue
+                except Exception as retry_error:
+                    print(f"✗ Retry failed: {retry_error}")
+                    pass  # If it still fails, continue with empty list
+            else:
+                print(f"✗ Error: {error_msg[:100]}")
             results[symbol] = []
+            # Still add delay even on error to avoid compounding rate limits
+            if i < len(symbols) - 1:
+                time_module.sleep(3.0)
             continue
     
+    print(f"\nCompleted fetching data for {len(symbols)} symbols")
     return results
 

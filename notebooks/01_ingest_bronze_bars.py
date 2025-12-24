@@ -1,10 +1,19 @@
 # Databricks notebook source
+# MAGIC %load_ext autoreload
+# MAGIC %autoreload 2
+# MAGIC # Enables autoreload; learn more at https://docs.databricks.com/en/files/workspace-modules.html#autoreload-for-python-modules
+# MAGIC # To disable autoreload; run %autoreload 0
+
+# COMMAND ----------
+
+# Databricks notebook source
 # MAGIC %md
 # MAGIC # Bronze Layer: S&P 500 Symbol Discovery & Data Ingestion
 # MAGIC
 # MAGIC This notebook:
 # MAGIC 1. Retrieves S&P 500 stock symbols from stockanalysis.com
-# MAGIC 2. Fetches previous day's 5-minute bar data for each symbol
+# MAGIC 2. Fetches the last complete trading day's 5-minute bar data for each symbol
+# MAGIC    (automatically skips weekends to find the most recent trading day)
 # MAGIC 3. Prepares data for bronze layer processing
 
 # COMMAND ----------
@@ -152,13 +161,43 @@ print(f"Last 10 symbols: {symbols[-10:]}")
 
 # COMMAND ----------
 
-# Step 2: Fetch previous day's 5-minute bar data
+# Step 2: Fetch last trading day's 5-minute bar data
+# The function automatically finds the last complete trading day (skips weekends)
 # For demonstration, we'll fetch data for a small subset of symbols
 # In production, you would process all symbols (possibly in batches)
 
+from src.utils import get_last_trading_day
+last_trading_day = get_last_trading_day()
+print(f"\nLast complete trading day: {last_trading_day} ({['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][last_trading_day.weekday()]})")
+
+# DEBUG: Test with 3 major stocks first
+debug_symbols = ['AAPL', 'MSFT', 'GOOGL']  # Apple, Microsoft, Google
+print(f"\n[DEBUG] Testing with 3 major stocks: {debug_symbols}")
+debug_data = fetch_previous_day_5min_bars(debug_symbols)
+
+# Display debug results
+print(f"\n[DEBUG] Results:")
+for symbol in debug_symbols:
+    if symbol in debug_data and debug_data[symbol]:
+        num_bars = len(debug_data[symbol])
+        print(f"  {symbol}: {num_bars} bars")
+        if num_bars > 0:
+            first_bar = debug_data[symbol][0]
+            last_bar = debug_data[symbol][-1]
+            print(f"    First: {first_bar['timestamp']} - Close: ${first_bar['close']:.2f}")
+            print(f"    Last: {last_bar['timestamp']} - Close: ${last_bar['close']:.2f}")
+    else:
+        print(f"  {symbol}: No data available")
+
+# COMMAND ----------
+
+# Now fetch for the sample symbols
 sample_symbols = symbols[:5]  # First 5 symbols for demo
-print(f"\nFetching previous day's 5-minute data for {len(sample_symbols)} symbols...")
+print(f"\nFetching 5-minute data for {len(sample_symbols)} symbols...")
 print(f"Symbols: {sample_symbols}")
+print("\nNote: Yahoo Finance may rate limit requests. The function includes")
+print("automatic delays and retries. For large batches, consider processing")
+print("in smaller chunks or adding additional delays between batches.")
 
 bars_data = fetch_previous_day_5min_bars(sample_symbols)
 
