@@ -1,11 +1,11 @@
 """
 Data source clients package.
 
-TODO: Export data source clients here as you build them
+Exports all market data source client implementations.
 """
 
-# TODO: Add imports as you implement clients
-# from .base_client import BaseMarketDataClient
-# from .yahoo_finance import YahooFinanceClient
-# from .alpaca_client import AlpacaClient
+from .base_client import BaseMarketDataClient
+from .yahoo_finance import YahooFinanceClient
+
+__all__ = ["BaseMarketDataClient", "YahooFinanceClient"]
 

@@ -1,0 +1,224 @@
+# AI Context & Development Rules
+
+## Style Notes
+
+- Don't create any new readme, md, txt or doc files unless specifically requested to
+- Always use strict typing on the frontend (typescript) and backend (python)
+- Don't include comments at specific lines etc... unless specifically instructed to
+- Always include a standard format docstring for each created function
+- Always include 1-2 doctests per function where supported
+- Design functions around the idea that they should be easy to fully test them in isolation of the rest of the system. This is the most important design principle when designing functions and code. Also design with single responsibility and loose coupling between components where possible.
+- Bias towards a functional style, and use simple objects with little inheritance, and at most one level of inheritance. Interfaces / Prototypes over object hierarchies. Still enforcing strict typing throughout
+- Keep functions and files at reasonable sizes, splitting by responsibility and reusability where needed. Keep roughly an upper limit of ~50 lines per function, and ~500 lines per file
+- Always run basic tests for functions you create and include basic test cases for new functionality when it is added
+- Never write too much code at once without testing code you've written. It's much more difficult to debug a complex system, than to debug and test components individually while building the system out
+- Including running tests as part of your checklists when implementing features or writing code
+- Any time code is being updated, be sure to update the corresponding docstring and tests as necessary, we should not create code which doesn't have corresponding passing test cases
+- Avoid overly verbose code, prioritize high quality concise code
+
+## Python-Specific Guidelines
+
+### Type Hints
+- Use strict type hints for all function parameters, return types, and class attributes
+- Use `typing` module types (e.g., `List[str]`, `Dict[str, Any]`, `Optional[int]`)
+- Use `from __future__ import annotations` for forward references when needed
+- Prefer `typing.Protocol` for structural typing over ABC when appropriate
+
+### Docstrings
+- Use Google-style docstrings for all functions, classes, and modules
+- Include: description, Args, Returns, Raises, and Examples sections
+- Include 1-2 doctests in the Examples section where applicable
+- Format example:
+  ```python
+  def function_name(param1: str, param2: int) -> bool:
+      """Brief description of the function.
+      
+      Longer description if needed explaining the purpose and behavior.
+      
+      Args:
+          param1: Description of param1
+          param2: Description of param2
+      
+      Returns:
+          Description of return value
+      
+      Raises:
+          ValueError: When param2 is negative
+      
+      Examples:
+          >>> function_name("test", 5)
+          True
+          >>> function_name("test", -1)
+          Traceback (most recent call last):
+          ...
+          ValueError: param2 must be positive
+      """
+  ```
+
+### Function Design
+- Functions should be pure and testable in isolation
+- Prefer immutable data structures where possible
+- Use dependency injection for external dependencies (APIs, databases, etc.)
+- Keep functions focused on a single responsibility
+- Return early to reduce nesting
+- Use type guards and validation at function boundaries
+
+### Code Organization
+- Group related functions together
+- Use modules to organize by responsibility, not by type
+- Keep imports organized: stdlib, third-party, local (with blank lines between)
+- Use `__all__` to explicitly define public API when appropriate
+
+## Testing Requirements
+
+### Test Structure
+- Create test files matching source structure: `tests/` directory mirroring `src/`
+- Use pytest as the testing framework
+- Test files should be named `test_*.py` or `*_test.py`
+- Test functions should be named `test_*`
+
+### Test Coverage
+- Every function must have corresponding test cases
+- Aim for high coverage of edge cases and error conditions
+- Test both happy paths and failure scenarios
+- Use fixtures for common test setup
+- Mock external dependencies (APIs, file I/O, etc.)
+
+### Test Execution
+- Run tests after implementing new functionality
+- Run tests before committing changes
+- Use `pytest -v` for verbose output
+- Use `pytest --cov` for coverage reports when available
+
+### Example Test Structure
+```python
+import pytest
+from typing import Any
+from src.module import function_name
+
+def test_function_name_success() -> None:
+    """Test function_name with valid inputs."""
+    result = function_name("test", 5)
+    assert result is True
+
+def test_function_name_failure() -> None:
+    """Test function_name with invalid inputs."""
+    with pytest.raises(ValueError):
+        function_name("test", -1)
+```
+
+## Databricks & Spark-Specific Guidelines
+
+### Spark Code
+- Always define explicit schemas using `StructType` for DataFrame operations
+- Use Delta Lake operations (merge, append, overwrite) appropriately
+- Prefer Spark SQL functions over UDFs when possible for performance
+- Use column-based operations over row-based iterations
+- Leverage Spark's lazy evaluation - avoid unnecessary materializations
+
+### Data Pipeline Patterns
+- Follow medallion architecture: Bronze (raw) → Silver (cleaned) → Gold (analytics)
+- Use idempotent operations (MERGE) for Silver and Gold layers
+- Include metadata columns: `ingestion_timestamp`, `data_source`, `batch_id`
+- Handle incremental loads properly with timestamp-based filtering
+- Validate data quality at each layer transition
+
+### Error Handling
+- Implement retry logic for external API calls with exponential backoff
+- Handle rate limiting gracefully
+- Log errors with sufficient context for debugging
+- Use try-except blocks around external API calls
+- Validate API responses before processing
+
+### Configuration Management
+- Use environment variables for sensitive data (API keys, credentials)
+- Never hardcode secrets or credentials
+- Use configuration classes or dictionaries for non-sensitive settings
+- Support multiple data sources through configuration
+
+## Development Workflow
+
+### Incremental Development
+1. Write function signature with type hints and docstring
+2. Write test cases first (TDD approach when possible)
+3. Implement function to pass tests
+4. Run tests to verify
+5. Refactor if needed while keeping tests passing
+6. Move to next function/feature
+
+### Code Review Checklist
+- [ ] Type hints present and correct
+- [ ] Docstring with examples/doctests
+- [ ] Tests written and passing
+- [ ] Functions are testable in isolation
+- [ ] No hardcoded values (use config/constants)
+- [ ] Error handling implemented
+- [ ] Code follows single responsibility principle
+- [ ] File/function size within limits (~50 lines/func, ~500 lines/file)
+
+### When Adding New Features
+1. Understand the requirement fully
+2. Design the interface/API first
+3. Write tests for the new functionality
+4. Implement incrementally with testing
+5. Update documentation (docstrings)
+6. Ensure all tests pass
+7. Check for integration with existing code
+
+## Project-Specific Context
+
+### Current Project: Databricks Market Data POC
+- Python-based data engineering pipeline
+- Uses PySpark and Delta Lake
+- Medallion architecture (Bronze/Silver/Gold)
+- Multiple market data sources (Alpaca, Yahoo Finance, etc.)
+- Notebook-based execution in Databricks
+- Focus on clean, interview-ready code
+
+### Key Modules
+- `src/data_sources/`: Data source clients (inherit from base_client)
+- `src/schemas.py`: Spark schema definitions
+- `src/transforms.py`: Spark transformation functions
+- `src/utils.py`: Utility functions
+- `src/config.py`: Configuration management
+- `notebooks/`: Databricks notebook execution scripts
+
+### Data Source Pattern
+- All data sources should inherit from `BaseMarketDataClient`
+- Implement abstract methods: `fetch_bars()`, `get_available_symbols()`
+- Handle rate limiting and retries in base class when possible
+- Return standardized data structures
+
+## Code Quality Standards
+
+### Readability
+- Use descriptive variable and function names
+- Avoid abbreviations unless widely understood
+- Use constants for magic numbers and strings
+- Group related code together
+
+### Performance
+- Prefer Spark operations over Python loops
+- Use broadcast variables for small lookup tables
+- Cache DataFrames only when reused multiple times
+- Avoid unnecessary data shuffles
+
+### Maintainability
+- Keep functions small and focused
+- Extract complex logic into separate functions
+- Use meaningful error messages
+- Document non-obvious business logic
+
+## Prohibited Practices
+
+- ❌ Creating documentation files (README, MD, TXT, DOC) without explicit request
+- ❌ Functions without type hints
+- ❌ Functions without docstrings
+- ❌ Code without corresponding tests
+- ❌ Hardcoded secrets or credentials
+- ❌ Functions longer than ~50 lines without refactoring
+- ❌ Files longer than ~500 lines without splitting
+- ❌ Deep inheritance hierarchies (max 1 level)
+- ❌ Inline comments explaining obvious code
+- ❌ Writing large amounts of code without testing incrementally
+

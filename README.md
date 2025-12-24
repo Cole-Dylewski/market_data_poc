@@ -53,11 +53,13 @@ The pipeline follows a standard Databricks lakehouse pattern:
 * Delta Lake
 * Databricks (Free Edition)
 * Multiple Market Data Sources:
-  * Alpaca Market Data API (optional, requires API keys)
-  * Yahoo Finance (free, no API keys required)
-  * Alpha Vantage (free tier available)
+  * **Yahoo Finance** (✅ implemented, free, no API keys required)
+  * Alpaca Market Data API (optional, requires API keys, TODO)
+  * Alpha Vantage (free tier available, TODO)
   * Other public/free market data APIs
 * REST-based ingestion using `requests`
+* Web scraping for symbol lists using `beautifulsoup4` (S&P 500 symbols from stockanalysis.com)
+* Testing framework: `pytest` with comprehensive test coverage
 
 ---
 
@@ -66,24 +68,30 @@ The pipeline follows a standard Databricks lakehouse pattern:
 ```
 databricks-market-data-poc/
 ├── README.md
+├── base_environment.yml        # Databricks serverless environment config
+├── databricks.yml             # Databricks asset bundle configuration
+├── requirements.txt           # Python package dependencies
+├── LICENSE
 ├── notebooks/
 │   ├── 00_setup.py
-│   ├── 01_ingest_bronze_bars.py
+│   ├── 01_ingest_bronze_bars.py  # Symbol scraping & data ingestion
 │   ├── 02_transform_silver_bars.py
 │   ├── 03_gold_analytics.py
 │   └── 04_data_quality_checks.py
 ├── src/
 │   ├── data_sources/          # Data source clients
 │   │   ├── __init__.py
-│   │   ├── alpaca_client.py   # Alpaca API client (optional)
-│   │   ├── yahoo_finance.py   # Yahoo Finance client (free)
-│   │   └── base_client.py     # Base class for data sources
+│   │   ├── base_client.py     # Abstract base class for data sources
+│   │   ├── yahoo_finance.py   # Yahoo Finance REST API client (✅ implemented)
+│   │   └── alpaca_client.py   # Alpaca API client (optional, TODO)
 │   ├── config.py
 │   ├── schemas.py
 │   ├── transforms.py
 │   └── utils.py
-├── requirements.txt
-└── LICENSE
+└── tests/
+    ├── data_sources/
+    │   └── test_yahoo_finance.py  # Unit tests for Yahoo Finance client
+    └── test_utils.py              # Unit tests for utility functions (S&P 500 scraper)
 ```
 
 ### Notebooks
@@ -92,7 +100,7 @@ databricks-market-data-poc/
   Environment setup, configuration loading, and shared utilities
 
 * `01_ingest_bronze_bars.py`
-  Pulls market bar data from configured data sources and writes raw records to bronze Delta tables
+  Generates list of S&P 500 stock symbols (scraped from stockanalysis.com) and downloads market bar data from configured data sources. Features dynamic path resolution that works in local Python, Databricks Repos, and Workspace environments. Saves data to JSON files by symbol for bronze layer processing.
 
 * `02_transform_silver_bars.py`
   Cleans, deduplicates, and normalizes bronze data into silver tables
@@ -107,9 +115,9 @@ databricks-market-data-poc/
 
 * `data_sources/`
   Modular data source clients that can be easily extended:
-  * `base_client.py`: Abstract base class defining the interface for all data sources
-  * `alpaca_client.py`: Alpaca API client (optional, requires API keys)
-  * `yahoo_finance.py`: Yahoo Finance client (free, no API keys required)
+  * `base_client.py`: Abstract base class defining the interface for all data sources (✅ implemented)
+  * `yahoo_finance.py`: Yahoo Finance REST API client with retry logic and error handling (✅ implemented, fully tested)
+  * `alpaca_client.py`: Alpaca API client (optional, requires API keys, TODO)
   * Additional data sources can be added by implementing the base client interface
 
 * `schemas.py`
@@ -119,19 +127,24 @@ databricks-market-data-poc/
   Reusable Spark transformation logic
 
 * `utils.py`
-  Utility functions for logging, date/time handling, and common operations
+  Utility functions including S&P 500 symbol scraper (`get_sp500_symbols()`), logging, date/time handling, and common operations
 
 ---
 
 ## Data Ingestion Approach
 
-* Supports multiple market data sources with a unified interface
-* Default configuration uses free data sources (e.g., Yahoo Finance) that require no API keys
-* Optional support for Alpaca API (requires API keys) for enhanced data quality
-* Supports parameterized symbols, timeframes, and time windows
-* Designed for incremental ingestion (e.g., last N minutes/hours)
-* Handles API rate limits with basic retry and error handling logic
-* Data source selection is configurable, allowing users to choose which sources to use
+* **Symbol Discovery**: Scrapes S&P 500 stock symbols from stockanalysis.com to generate a curated list of 500+ major US stocks. The scraper (`get_sp500_symbols()` in `src/utils.py`) automatically extracts symbols from the HTML table and validates them.
+* **Dynamic Path Resolution**: Notebooks automatically detect the project root regardless of where the repository is cloned (local Python, Databricks Repos, or Workspace environments), making the project easily shareable and cloneable.
+* **Unified Interface**: All data sources implement `BaseMarketDataClient` for consistent API
+* **Yahoo Finance Integration**: Fully implemented REST API client with:
+  - Automatic retry logic with exponential backoff
+  - Rate limiting handling
+  - Standardized OHLCV data format
+  - No API keys required
+* **Flexible Configuration**: Supports parameterized symbols, timeframes, and time windows
+* **Incremental Ingestion**: Designed for fetching last N days/hours of data
+* **Error Handling**: Robust error handling and logging throughout
+* **Output Format**: Saves data to JSON files organized by symbol for bronze layer processing
 
 Streaming and WebSocket ingestion are intentionally out of scope for this POC.
 
@@ -160,31 +173,52 @@ Although this is a demonstration project, basic quality checks are included:
 
 ## How to Run
 
+### Local Development
+
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/Cole-Dylewski/databricks-market-data-poc.git
    cd databricks-market-data-poc
    ```
 
-2. **Import the project into a Databricks workspace:**
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Run tests:**
+   ```bash
+   pytest tests/ -v
+   ```
+
+### Databricks Setup
+
+1. **Import the project into a Databricks workspace:**
    - Use Databricks Repos to connect the repository (recommended), or
    - Manually upload the notebooks and source files
 
-3. **Install dependencies:**
-   - Install packages from `requirements.txt` in your Databricks cluster or environment
-   - Note: PySpark and Delta Lake are typically pre-installed in Databricks
+2. **Configure environment:**
+   - For **serverless notebooks**: 
+     - Upload `base_environment.yml` to Databricks workspace
+     - Go to Settings → Workspace admin → Compute
+     - Click "Manage" next to "Base environments for serverless compute"
+     - Create new environment and upload `base_environment.yml`
+     - Set as default if desired
+   - For **cluster-based notebooks**: 
+     - Install packages from `requirements.txt` in your Databricks cluster
+     - Note: PySpark and Delta Lake are typically pre-installed in Databricks
 
-4. **Configure data sources (optional):**
-   - By default, the project uses free data sources (e.g., Yahoo Finance) that require no API keys
+3. **Configure data sources (optional):**
+   - By default, the project uses Yahoo Finance which requires no API keys
    - To use Alpaca or other premium sources, set API credentials as environment variables or notebook parameters
    - See `src/config.py` for data source configuration options
 
-5. **Run notebooks in order:**
-   1. `00_setup.py`
-   2. `01_ingest_bronze_bars.py`
-   3. `02_transform_silver_bars.py`
-   4. `03_gold_analytics.py`
-   5. `04_data_quality_checks.py`
+4. **Run notebooks in order:**
+   1. `00_setup.py` - Environment setup
+   2. `01_ingest_bronze_bars.py` - Generate symbol list and download market data
+   3. `02_transform_silver_bars.py` - Clean and normalize data
+   4. `03_gold_analytics.py` - Build analytics tables
+   5. `04_data_quality_checks.py` - Validate data quality
 
 ---
 
@@ -200,8 +234,26 @@ It is not intended for live trading, real-time analytics, or production deployme
 
 ---
 
-## Future Enhancements (Not Implemented)
+## Implementation Status
 
+### ✅ Completed
+* Yahoo Finance REST API client with full test coverage
+* Base client abstract interface
+* S&P 500 symbol scraper from stockanalysis.com with comprehensive test coverage
+* Dynamic path resolution for notebooks (works in local Python, Databricks Repos, and Workspace)
+* Databricks base environment configuration
+* Testing framework setup with pytest
+
+### 🚧 In Progress
+* Bronze layer ingestion pipeline
+* Symbol list generation and persistence
+
+### 📋 TODO
+* Alpaca API client implementation
+* Silver layer transformations
+* Gold layer analytics
+* Delta Lake table schemas
+* Data quality checks
 * Databricks Jobs orchestration
 * Structured Streaming ingestion
 * Secret scopes / key vault integration
