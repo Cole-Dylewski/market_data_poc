@@ -81,10 +81,9 @@ jobs:
         pytest tests/ -v --cov=src --cov-report=xml --cov-report=html --cov-report=term --tb=short
 
     - name: Upload coverage to Codecov
-      working-directory: market_data_poc
       uses: codecov/codecov-action@v3
       with:
-        file: ./coverage.xml
+        file: market_data_poc/coverage.xml
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: false
