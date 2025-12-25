@@ -18,14 +18,12 @@ jobs:
         python-version: "3.11"
     
     - name: Install dependencies
-      working-directory: market_data_poc
       run: |
         pip install --upgrade pip
         pip install -r requirements.txt
         pip install pytest pytest-cov
     
     - name: Run tests
-      working-directory: market_data_poc
       run: |
         pytest tests/ -v
 
@@ -44,6 +42,5 @@ jobs:
         pip install flake8
     
     - name: Run flake8
-      working-directory: market_data_poc
       run: |
         flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
