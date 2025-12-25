@@ -446,12 +446,19 @@ The pipeline includes comprehensive quality checks:
    pip install -r requirements.txt
    ```
 
-3. **Run tests:**
+3. **Run comprehensive test suite:**
+   ```bash
+   python run_tests.py
+   ```
+   This runs all validation checks including syntax, imports, tests, coverage, and code quality.
+   See `TEST_RUNNER.md` for detailed information.
+
+4. **Run tests manually:**
    ```bash
    pytest tests/ -v --cov=src --cov-report=html
    ```
 
-4. **Run linting:**
+5. **Run linting:**
    ```bash
    flake8 src/ tests/
    black --check src/ tests/
