@@ -448,7 +448,13 @@ The pipeline includes comprehensive quality checks:
 
 3. **Run tests:**
    ```bash
-   pytest tests/ -v
+   pytest tests/ -v --cov=src --cov-report=html
+   ```
+
+4. **Run linting:**
+   ```bash
+   flake8 src/ tests/
+   black --check src/ tests/
    ```
 
 ### Databricks Setup
