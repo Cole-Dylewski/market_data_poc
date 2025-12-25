@@ -33,6 +33,12 @@ resources:
         on_success: []
         on_failure: []
         on_start: []
+      notification_settings:
+        no_alert_for_skipped_runs: false
+      timeout_seconds: 0
+      tags:
+        environment: "production"
+        pipeline: "market_data"
 
     market_data_medallion_pipeline:
       name: "Market Data Medallion Pipeline (DLT)"
@@ -40,11 +46,20 @@ resources:
         - task_key: dlt_pipeline
           pipeline_task:
             pipeline_id: ${resources.pipelines.market_data_medallion_pipeline.id}
+          depends_on:
+            - task_key: collect_raw_data
+              job_id: ${resources.jobs.market_data_collection.id}
       max_concurrent_runs: 1
       email_notifications:
         on_success: []
         on_failure: []
         on_start: []
+      notification_settings:
+        no_alert_for_skipped_runs: false
+      timeout_seconds: 0
+      tags:
+        environment: "production"
+        pipeline: "market_data"
 
     market_data_quality_checks:
       name: "Market Data Quality Checks"
@@ -69,4 +84,10 @@ resources:
         on_success: []
         on_failure: []
         on_start: []
+      notification_settings:
+        no_alert_for_skipped_runs: false
+      timeout_seconds: 0
+      tags:
+        environment: "production"
+        pipeline: "market_data"
 

@@ -23,6 +23,7 @@
 # MAGIC
 # MAGIC **Streaming**: Uses Structured Streaming with Auto Loader for automatic file detection
 # MAGIC **Exactly-Once**: Uses checkpointing to ensure no duplicates even if job restarts
+# MAGIC **Production Mode**: Continuous streaming enabled for production-ready real-time ingestion
 # MAGIC **Databricks Features**: Auto Loader, Unity Catalog, Delta Lake streaming
 
 # COMMAND ----------
@@ -276,42 +277,20 @@ try:
     print(f"     Writing to: {bronze_table}")
     print(f"     Checkpoint: {checkpoint_path}")
     
-    # Choose processing mode:
-    # Option 1: Batch mode - process available files and stop (default for tech demo)
-    # Option 2: Continuous mode - keep running and watch for new files
-    
-    # BATCH MODE: Process available files once and stop
-    print(f"\n=== Batch Mode: Processing Available Files ===")
-    print("Processing all available files and stopping...")
+    # CONTINUOUS MODE: Production-ready streaming that processes files as they arrive
+    print(f"\n=== Continuous Streaming Mode ===")
+    print("Stream will keep running and automatically process new files as they arrive.")
+    print("This is production-ready continuous ingestion.")
+    print("To stop: query.stop() or interrupt the notebook")
     
     query = bronze_stream.writeStream \
         .format("delta") \
         .outputMode("append") \
         .option("checkpointLocation", checkpoint_path) \
         .option("mergeSchema", "true") \
-        .trigger(availableNow=True) \
         .table(bronze_table)
     
     query.awaitTermination()
-    
-    # Verify write
-    final_count = spark.table(bronze_table).count()
-    print(f"\n=== Batch Ingestion Complete ===")
-    print(f"Total rows in {bronze_table}: {final_count}")
-    
-    # CONTINUOUS MODE: Uncomment below for continuous streaming
-    # print(f"\n=== Continuous Streaming Mode ===")
-    # print("Stream will keep running and process new files as they arrive.")
-    # print("To stop: query.stop() or interrupt the notebook")
-    # 
-    # query = bronze_stream.writeStream \
-    #     .format("delta") \
-    #     .outputMode("append") \
-    #     .option("checkpointLocation", checkpoint_path) \
-    #     .option("mergeSchema", "true") \
-    #     .table(bronze_table)
-    # 
-    # query.awaitTermination()
     
 except Exception as e:
     print(f"[ERROR] Failed to start streaming query: {e}")

@@ -28,8 +28,13 @@ resources:
             spark.databricks.delta.autoCompact.enabled: "true"
             spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite: "true"
             spark.databricks.delta.properties.defaults.autoOptimize.autoCompact: "true"
-      development: true
-      continuous: false
+            spark.sql.adaptive.enabled: "true"
+            spark.sql.adaptive.coalescePartitions.enabled: "true"
+            spark.databricks.io.cache.enabled: "true"
+            spark.databricks.delta.schema.autoMerge.enabled: "true"
+      development: false
+      continuous: true
       photon: true
       serverless: false
+      channel: "CURRENT"
 

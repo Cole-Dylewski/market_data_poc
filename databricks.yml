@@ -24,16 +24,16 @@ targets:
       gold_catalog: "main"
       gold_schema: "gold"
 
-  # Uncomment and configure for production
-  # prod:
-  #   mode: production
-  #   workspace:
-  #     host: ${var.databricks_host_prod}
-  #   variables:
-  #     raw_bars_path: "/Volumes/main/default/raw_market_data/bars"
-  #     bronze_catalog: "main"
-  #     bronze_schema: "bronze"
-  #     silver_catalog: "main"
-  #     silver_schema: "silver"
-  #     gold_catalog: "main"
-  #     gold_schema: "gold"
+  prod:
+    mode: production
+    workspace:
+      host: ${var.databricks_host_prod}
+    variables:
+      target_schema: "main"
+      raw_bars_path: "/Volumes/main/default/raw_market_data/bars"
+      bronze_catalog: "main"
+      bronze_schema: "bronze"
+      silver_catalog: "main"
+      silver_schema: "silver"
+      gold_catalog: "main"
+      gold_schema: "gold"
