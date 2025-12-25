@@ -25,7 +25,6 @@ pytz>=2023.3
 
 # Market data sources
 yfinance>=0.2.0
-# alpaca-trade-api>=3.0.0
 
 # Data quality and validation
 great-expectations>=0.18.0

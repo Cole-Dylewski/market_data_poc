@@ -69,12 +69,6 @@ DATA_SOURCES: Dict[str, Dict[str, Any]] = {
         "retry_attempts": 3,
         "retry_delay_seconds": 15.0,
     },
-    "alpaca": {
-        "enabled": False,  # Requires API keys
-        "api_key": os.getenv("ALPACA_API_KEY", ""),
-        "api_secret": os.getenv("ALPACA_API_SECRET", ""),
-        "base_url": "https://paper-api.alpaca.markets",  # or data.alpaca.markets
-    },
 }
 
 # Pipeline settings

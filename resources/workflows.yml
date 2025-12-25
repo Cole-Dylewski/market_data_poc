@@ -1,0 +1,93 @@
+# Databricks Workflows Configuration
+# See https://docs.databricks.com/workflows/
+
+resources:
+  jobs:
+    market_data_collection:
+      name: "Market Data Collection"
+      tasks:
+        - task_key: collect_raw_data
+          notebook_task:
+            notebook_path: ./notebooks/01_collect_raw_data.py
+          new_cluster:
+            spark_version: "14.3.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 1
+            spark_conf:
+              spark.databricks.cluster.profile: "singleNode"
+              spark.master: "local[*]"
+          libraries:
+            - pypi:
+                package: "yfinance>=0.2.0"
+            - pypi:
+                package: "beautifulsoup4>=4.12.0"
+          timeout_seconds: 3600
+          max_retries: 2
+          min_retries: 1
+          retry_on_timeout: true
+      schedule:
+        quartz_cron_expression: "0 0 17 * * ?"  # Daily at 5 PM (after market close)
+        timezone_id: "America/New_York"
+      max_concurrent_runs: 1
+      email_notifications:
+        on_success: []
+        on_failure: []
+        on_start: []
+      notification_settings:
+        no_alert_for_skipped_runs: false
+      timeout_seconds: 0
+      tags:
+        environment: "production"
+        pipeline: "market_data"
+
+    market_data_medallion_pipeline:
+      name: "Market Data Medallion Pipeline (DLT)"
+      tasks:
+        - task_key: dlt_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.market_data_medallion_pipeline.id}
+          depends_on:
+            - task_key: collect_raw_data
+              job_id: ${resources.jobs.market_data_collection.id}
+      max_concurrent_runs: 1
+      email_notifications:
+        on_success: []
+        on_failure: []
+        on_start: []
+      notification_settings:
+        no_alert_for_skipped_runs: false
+      timeout_seconds: 0
+      tags:
+        environment: "production"
+        pipeline: "market_data"
+
+    market_data_quality_checks:
+      name: "Market Data Quality Checks"
+      tasks:
+        - task_key: quality_checks
+          notebook_task:
+            notebook_path: ./notebooks/05_data_quality_checks.py
+          depends_on:
+            - task_key: dlt_pipeline
+              job_id: ${resources.jobs.market_data_medallion_pipeline.id}
+          new_cluster:
+            spark_version: "14.3.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 1
+            spark_conf:
+              spark.databricks.cluster.profile: "singleNode"
+              spark.master: "local[*]"
+          timeout_seconds: 1800
+          max_retries: 1
+      max_concurrent_runs: 1
+      email_notifications:
+        on_success: []
+        on_failure: []
+        on_start: []
+      notification_settings:
+        no_alert_for_skipped_runs: false
+      timeout_seconds: 0
+      tags:
+        environment: "production"
+        pipeline: "market_data"
+

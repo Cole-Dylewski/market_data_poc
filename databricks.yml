@@ -1,19 +1,39 @@
-# This is a Databricks asset bundle definition for market_data_poc.
-# The Databricks extension requires databricks.yml configuration file.
-# See https://docs.databricks.com/dev-tools/bundles/index.html for documentation.
+# Databricks Asset Bundle configuration
+# See https://docs.databricks.com/dev-tools/bundles/index.html
 
 bundle:
   name: market_data_poc
+
+include:
+  - resources/dlt_pipeline.yml
+  - resources/workflows.yml
 
 targets:
   dev:
     mode: development
     default: true
     workspace:
-      host: https://dbc-1239dd92-9d6f.cloud.databricks.com
+      host: ${var.databricks_host}
+    variables:
+      target_schema: "main"  # Required for DLT pipeline
+      raw_bars_path: "/Volumes/main/default/raw_market_data/bars"
+      bronze_catalog: "main"
+      bronze_schema: "bronze"
+      silver_catalog: "main"
+      silver_schema: "silver"
+      gold_catalog: "main"
+      gold_schema: "gold"
 
-  ## Optionally, there could be 'staging' or 'prod' targets here.
-  #
-  # prod:
-  #   workspace:
-  #     host: https://dbc-1239dd92-9d6f.cloud.databricks.com
+  prod:
+    mode: production
+    workspace:
+      host: ${var.databricks_host_prod}
+    variables:
+      target_schema: "main"
+      raw_bars_path: "/Volumes/main/default/raw_market_data/bars"
+      bronze_catalog: "main"
+      bronze_schema: "bronze"
+      silver_catalog: "main"
+      silver_schema: "silver"
+      gold_catalog: "main"
+      gold_schema: "gold"

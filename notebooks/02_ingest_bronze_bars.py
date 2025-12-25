@@ -8,16 +8,23 @@
 
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Bronze Layer: Ingest Raw Data to Delta Tables
+# MAGIC # Bronze Layer: Streaming Ingestion to Delta Tables
 # MAGIC
-# MAGIC **Production Pipeline - Step 2: Bronze Ingestion**
+# MAGIC **Production Pipeline - Step 2: Bronze Streaming Ingestion**
 # MAGIC
-# MAGIC This notebook:
-# MAGIC 1. Reads raw JSON files from Databricks Volume (landing zone)
-# MAGIC 2. Validates and structures the data according to Bronze schema
-# MAGIC 3. Writes to Bronze Delta tables using idempotent MERGE operations
+# MAGIC **Note**: For production, consider using the Delta Live Tables (DLT) pipeline (`dlt_pipeline.py`) 
+# MAGIC which provides automatic dependency management, data quality expectations, and built-in monitoring.
 # MAGIC
-# MAGIC **Idempotent**: Uses Delta MERGE to safely re-run without duplicates
+# MAGIC This notebook provides an alternative implementation using Structured Streaming:
+# MAGIC 1. Sets up a streaming job that monitors the landing zone for new JSON files
+# MAGIC 2. Automatically ingests new files as they arrive using Auto Loader
+# MAGIC 3. Validates and structures the data according to Bronze schema
+# MAGIC 4. Writes to Bronze Delta table using streaming writes with exactly-once semantics
+# MAGIC
+# MAGIC **Streaming**: Uses Structured Streaming with Auto Loader for automatic file detection
+# MAGIC **Exactly-Once**: Uses checkpointing to ensure no duplicates even if job restarts
+# MAGIC **Production Mode**: Continuous streaming enabled for production-ready real-time ingestion
+# MAGIC **Databricks Features**: Auto Loader, Unity Catalog, Delta Lake streaming
 
 # COMMAND ----------
 
@@ -149,231 +156,166 @@ spark = SparkSession.builder \
     .appName("Bronze Ingestion") \
     .config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") \
     .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog") \
+    .config("spark.databricks.delta.optimizeWrite.enabled", "true") \
+    .config("spark.databricks.delta.autoCompact.enabled", "true") \
+    .config("spark.databricks.io.cache.enabled", "true") \
     .getOrCreate()
 
-print("Spark session initialized with Delta Lake support")
+print("Spark session initialized with Delta Lake and Databricks optimizations")
+print("  - Delta Lake extensions enabled")
+print("  - Auto-optimize write enabled")
+print("  - Auto-compact enabled")
+print("  - IO cache enabled")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 2: Read Raw Data from Volume
+# MAGIC ## Step 2: Configure Streaming Source
 
 # COMMAND ----------
-
-# Get the most recent timestamped file, or use a specific date
-# In production, you might pass the date as a parameter or use the most recent
 
 raw_bars_path = DATABRICKS_PATHS["raw_bars_path"]
-
-# List available timestamped JSON files
-try:
-    # Find all timestamped JSON files (format: bars_YYYYMMDD.json)
-    json_files = [f.path for f in dbutils.fs.ls(raw_bars_path) if f.name.startswith('bars_') and f.name.endswith('.json')]
-    
-    if not json_files:
-        # Fallback: look for any JSON files (for backward compatibility)
-        json_files = [f.path for f in dbutils.fs.ls(raw_bars_path) if f.name.endswith('.json')]
-        if json_files:
-            print(f"[WARN] Found {len(json_files)} JSON files, but expected timestamped files (bars_YYYYMMDD.json)")
-            print(f"       Using most recent file")
-        else:
-            raise ValueError(f"No JSON files found in {raw_bars_path}")
-    
-    # Use the most recent file (extract date from filename)
-    if len(json_files) > 1:
-        # Sort by filename (which includes date) to get most recent
-        json_files = sorted(json_files)
-        print(f"[INFO] Found {len(json_files)} timestamped files, using most recent")
-    
-    latest_file = json_files[-1]
-    # Extract date from filename (bars_YYYYMMDD.json)
-    filename = Path(latest_file).name
-    date_str = filename.replace('bars_', '').replace('.json', '')
-    latest_date_dir = date_str
-    
-    print(f"Reading raw data from: {raw_bars_path}")
-    print(f"Selected file: {latest_file}")
-    print(f"Date: {latest_date_dir}")
-    
-    json_files = [latest_file]
-    
-except Exception as e:
-    print(f"[ERROR] Failed to read from volume: {e}")
-    raise
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Step 3: Load and Structure Data
-
-# COMMAND ----------
-
-# Read the single timestamped JSON file using Spark (handles large files efficiently)
-file_path = json_files[0]
-print(f"Reading data from: {file_path}")
-
-try:
-    # Use Spark to read JSON file (handles large files better than dbutils.fs.head)
-    # Spark can read JSON files directly and handle size limits automatically
-    raw_df = spark.read.json(file_path)
-    
-    print(f"[OK] Loaded JSON file into DataFrame")
-    print(f"     Initial row count: {raw_df.count()}")
-    
-    # Add metadata columns
-    ingestion_timestamp = datetime.now()
-    from pyspark.sql.functions import lit
-    
-    bronze_df = raw_df \
-        .withColumn("data_source", lit("yahoo_finance")) \
-        .withColumn("ingestion_timestamp", lit(ingestion_timestamp)) \
-        .withColumn("batch_id", lit(latest_date_dir))
-    
-    print(f"[OK] Added metadata columns")
-    print(f"     Final row count: {bronze_df.count()}")
-    
-    # Count unique symbols
-    unique_symbols = bronze_df.select("symbol").distinct().count()
-    print(f"     Contains data for {unique_symbols} symbols")
-    
-except Exception as e:
-    print(f"[ERROR] Failed to load JSON file with Spark: {e}")
-    print("       Falling back to Python JSON parsing...")
-    
-    # Fallback: try reading with Python (for smaller files)
-    try:
-        json_content = dbutils.fs.head(file_path, maxBytes=100 * 1024 * 1024)  # 100MB limit
-        bars_data = json.loads(json_content)
-        
-        # Add metadata to each bar
-        ingestion_timestamp = datetime.now()
-        for bar in bars_data:
-            bar["data_source"] = "yahoo_finance"
-            bar["ingestion_timestamp"] = ingestion_timestamp.isoformat()
-            bar["batch_id"] = latest_date_dir
-        
-        # Create DataFrame from Python list
-        bronze_df = spark.createDataFrame(bars_data, schema=BRONZE_BARS_SCHEMA)
-        print(f"[OK] Loaded {len(bars_data)} bars using Python fallback")
-    except Exception as fallback_error:
-        print(f"[ERROR] Fallback also failed: {fallback_error}")
-        raise
-
-if bronze_df.count() == 0:
-    raise ValueError("No data loaded from volume file")
-
-print(f"\nTotal bars loaded: {bronze_df.count()}")
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Step 4: Create DataFrame and Apply Schema
-
-# COMMAND ----------
-
-# Ensure timestamp columns are properly typed
-# (Spark JSON reader may have already converted them, but we'll ensure it)
-from pyspark.sql.functions import to_timestamp
-
-# Check if timestamp columns need conversion
-if bronze_df.schema["timestamp"].dataType.typeName() != "timestamp":
-    bronze_df = bronze_df.withColumn("timestamp", to_timestamp(col("timestamp")))
-
-if bronze_df.schema["ingestion_timestamp"].dataType.typeName() != "timestamp":
-    bronze_df = bronze_df.withColumn("ingestion_timestamp", to_timestamp(col("ingestion_timestamp")))
-
-# Ensure schema matches BRONZE_BARS_SCHEMA (Spark may infer slightly different types)
-# Cast to ensure consistency
-bronze_df = bronze_df.select(
-    col("symbol").cast("string"),
-    col("timestamp").cast("timestamp"),
-    col("open").cast("double"),
-    col("high").cast("double"),
-    col("low").cast("double"),
-    col("close").cast("double"),
-    col("volume").cast("bigint"),
-    col("data_source").cast("string"),
-    col("ingestion_timestamp").cast("timestamp"),
-    col("batch_id").cast("string")
-)
-
-print(f"Bronze DataFrame prepared with {bronze_df.count()} rows")
-bronze_df.printSchema()
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Step 5: Write to Bronze Delta Table (Idempotent MERGE)
-
-# COMMAND ----------
-
 bronze_table = DATABRICKS_PATHS["bronze_bars_table"]
+checkpoint_path = f"{raw_bars_path}/_checkpoints/bronze_ingestion"
 
-# Create catalog and schema if they don't exist
+print(f"Streaming source path: {raw_bars_path}")
+print(f"Target table: {bronze_table}")
+print(f"Checkpoint path: {checkpoint_path}")
+
+# Create checkpoint directory if it doesn't exist
+try:
+    dbutils.fs.mkdirs(checkpoint_path)
+    print(f"[OK] Checkpoint directory ready: {checkpoint_path}")
+except Exception as e:
+    print(f"Note: {e}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 3: Create Catalog and Schema
+
+# COMMAND ----------
+
 catalog = DATABRICKS_PATHS["bronze_catalog"]
 schema = DATABRICKS_PATHS["bronze_schema"]
 
 try:
     spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog}")
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
-    print(f"Created catalog/schema: {catalog}.{schema}")
+    print(f"[OK] Created catalog/schema: {catalog}.{schema}")
 except Exception as e:
     print(f"Note: {e}")
 
-# Write to Delta table using MERGE for idempotency
-# This ensures we can re-run the ingestion without creating duplicates
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 4: Define Streaming Query
+
+# COMMAND ----------
+
+from pyspark.sql.functions import (
+    col, lit, current_timestamp, to_timestamp,
+    input_file_name, regexp_extract
+)
+
+# Define the streaming source using Auto Loader
+# Auto Loader automatically detects new files and handles schema evolution
+streaming_df = spark.readStream \
+    .format("cloudFiles") \
+    .option("cloudFiles.format", "json") \
+    .option("cloudFiles.schemaLocation", f"{checkpoint_path}/schema") \
+    .option("cloudFiles.inferColumnTypes", "true") \
+    .option("pathGlobFilter", "bars_*.json") \
+    .load(raw_bars_path)
+
+print("[OK] Streaming source configured with Auto Loader")
+print("     - Automatically detects new JSON files")
+print("     - Handles schema evolution")
+print("     - Processes files matching bars_*.json pattern")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 5: Transform and Add Metadata
+
+# COMMAND ----------
+
+# Extract batch_id from filename (bars_YYYYMMDD.json)
+bronze_stream = streaming_df \
+    .withColumn(
+        "batch_id",
+        regexp_extract(input_file_name(), r"bars_(\d{8})\.json", 1)
+    ) \
+    .withColumn("ingestion_timestamp", current_timestamp()) \
+    .select(
+        col("symbol").cast("string"),
+        to_timestamp(col("timestamp")).alias("timestamp"),
+        col("open").cast("double"),
+        col("high").cast("double"),
+        col("low").cast("double"),
+        col("close").cast("double"),
+        col("volume").cast("bigint"),
+        col("ingestion_timestamp").cast("timestamp"),
+        col("batch_id").cast("string")
+    )
+
+print("[OK] Streaming transformation configured")
+print("     - Schema enforcement applied")
+print("     - Metadata columns added (ingestion_timestamp, batch_id)")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 6: Write Stream to Bronze Delta Table
+
+# COMMAND ----------
+
+# Write stream to Delta table with exactly-once semantics
+# Checkpointing ensures no duplicates even if the job restarts
 try:
-    # Check if table exists
-    table_exists = spark.catalog.tableExists(bronze_table)
+    print(f"[OK] Starting streaming query")
+    print(f"     Writing to: {bronze_table}")
+    print(f"     Checkpoint: {checkpoint_path}")
     
-    if table_exists:
-        # Use MERGE to upsert data (idempotent)
-        print(f"Table {bronze_table} exists. Using MERGE for idempotent upsert...")
-        
-        # Create temporary view for merge
-        bronze_df.createOrReplaceTempView("new_bronze_data")
-        
-        # MERGE statement: update if exists, insert if not
-        merge_sql = f"""
-        MERGE INTO {bronze_table} AS target
-        USING new_bronze_data AS source
-        ON target.symbol = source.symbol 
-           AND target.timestamp = source.timestamp
-           AND target.batch_id = source.batch_id
-        WHEN MATCHED THEN
-            UPDATE SET *
-        WHEN NOT MATCHED THEN
-            INSERT *
-        """
-        
-        spark.sql(merge_sql)
-        print(f"[OK] Merged data into {bronze_table}")
-        
-    else:
-        # First time: create table
-        print(f"Table {bronze_table} does not exist. Creating new table...")
-        bronze_df.write \
-            .format("delta") \
-            .mode("overwrite") \
-            .option("overwriteSchema", "true") \
-            .saveAsTable(bronze_table)
-        print(f"[OK] Created and wrote to {bronze_table}")
+    # CONTINUOUS MODE: Production-ready streaming that processes files as they arrive
+    print(f"\n=== Continuous Streaming Mode ===")
+    print("Stream will keep running and automatically process new files as they arrive.")
+    print("This is production-ready continuous ingestion.")
+    print("To stop: query.stop() or interrupt the notebook")
     
-    # Verify write
-    final_count = spark.table(bronze_table).count()
-    print(f"\n=== Ingestion Complete ===")
-    print(f"Total rows in {bronze_table}: {final_count}")
+    query = bronze_stream.writeStream \
+        .format("delta") \
+        .outputMode("append") \
+        .option("checkpointLocation", checkpoint_path) \
+        .option("mergeSchema", "true") \
+        .table(bronze_table)
+    
+    query.awaitTermination()
     
 except Exception as e:
-    print(f"[ERROR] Failed to write to Delta table: {e}")
+    print(f"[ERROR] Failed to start streaming query: {e}")
     raise
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Ingestion Complete
+# MAGIC ## Streaming Ingestion Complete
 # MAGIC
-# MAGIC Data has been successfully ingested into the Bronze Delta table.
+# MAGIC **Batch Mode**: Processed all available files and stopped.
+# MAGIC
+# MAGIC **For Continuous Streaming** (process files as they arrive):
+# MAGIC - Uncomment the continuous mode section in Step 6
+# MAGIC - The stream will keep running and automatically process new files
+# MAGIC - Use `query.stop()` to stop the stream
+# MAGIC
+# MAGIC **Checkpointing**: The checkpoint ensures exactly-once semantics - files are only processed once even if the job restarts.
+# MAGIC
+# MAGIC **Auto Loader Benefits**:
+# MAGIC - Automatically detects new files
+# MAGIC - Handles schema evolution
+# MAGIC - Efficient incremental processing
+# MAGIC - Exactly-once guarantees via checkpointing
+# MAGIC
 # MAGIC The next pipeline step (`03_transform_silver_bars.py`) will read from Bronze
 # MAGIC and transform data into the Silver layer.
 

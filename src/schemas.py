@@ -26,7 +26,6 @@ BRONZE_BARS_SCHEMA = StructType([
     StructField("close", DoubleType(), nullable=True),
     StructField("volume", LongType(), nullable=True),
     # Metadata fields
-    StructField("data_source", StringType(), nullable=False),
     StructField("ingestion_timestamp", TimestampType(), nullable=False),
     StructField("batch_id", StringType(), nullable=True),  # For tracking ingestion batches
 ])
@@ -49,7 +48,6 @@ SILVER_BARS_SCHEMA = StructType([
     StructField("close", DoubleType(), nullable=False),
     StructField("volume", LongType(), nullable=False),
     # Metadata
-    StructField("data_source", StringType(), nullable=False),
     StructField("processed_timestamp", TimestampType(), nullable=False),
     # Quality flags
     StructField("is_valid", IntegerType(), nullable=True),  # 1 for valid, 0 for invalid

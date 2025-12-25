@@ -1,0 +1,40 @@
+# Delta Live Tables Pipeline Configuration
+# See https://docs.databricks.com/data-engineering/delta-live-tables/
+
+resources:
+  pipelines:
+    market_data_medallion_pipeline:
+      name: "Market Data Medallion Pipeline"
+      catalog: main
+      target: ${var.target_schema}
+      storage: "/Volumes/main/default/dlt_storage"
+      configuration:
+        raw_bars_path: ${var.raw_bars_path}
+        bronze_catalog: ${var.bronze_catalog}
+        bronze_schema: ${var.bronze_schema}
+        silver_catalog: ${var.silver_catalog}
+        silver_schema: ${var.silver_schema}
+        gold_catalog: ${var.gold_catalog}
+        gold_schema: ${var.gold_schema}
+      libraries:
+        - notebook:
+            path: ./notebooks/dlt_pipeline.py
+      clusters:
+        - label: "default"
+          num_workers: 2
+          node_type_id: "i3.xlarge"
+          spark_conf:
+            spark.databricks.delta.optimizeWrite.enabled: "true"
+            spark.databricks.delta.autoCompact.enabled: "true"
+            spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite: "true"
+            spark.databricks.delta.properties.defaults.autoOptimize.autoCompact: "true"
+            spark.sql.adaptive.enabled: "true"
+            spark.sql.adaptive.coalescePartitions.enabled: "true"
+            spark.databricks.io.cache.enabled: "true"
+            spark.databricks.delta.schema.autoMerge.enabled: "true"
+      development: false
+      continuous: true
+      photon: true
+      serverless: false
+      channel: "CURRENT"
+

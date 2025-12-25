@@ -2,11 +2,17 @@
 
 ## Overview
 
-This project is a proof-of-concept data engineering pipeline that demonstrates how financial market data can be ingested from multiple public and free data sources into Databricks using Apache Spark and Delta Lake. The primary goal is to showcase modern lakehouse design patterns, incremental ingestion techniques, and Spark-based analytical transformations in a Databricks environment.
+This project is a **production-ready** data engineering pipeline that demonstrates how financial market data can be ingested from Yahoo Finance into Databricks using Apache Spark and Delta Lake. The pipeline showcases modern lakehouse design patterns, real-time streaming ingestion, and Spark-based analytical transformations using Databricks native technologies.
 
-The project supports multiple market data sources, including Alpaca (optional, requires API keys) and other public/free data sources that can be used without authentication. This makes the repository easily cloneable and usable by anyone without requiring API keys or secrets.
+The project uses Yahoo Finance as the sole data source, which requires no API keys and makes the repository easily cloneable and usable by anyone without requiring authentication or secrets.
 
-The project is intentionally scoped as a technical demonstration rather than a production system. It emphasizes clarity, correctness, and architectural best practices over enterprise-scale operational complexity.
+**Production Features**:
+- Continuous streaming with Delta Live Tables (DLT)
+- Real-time data processing
+- Automatic file detection and schema evolution
+- Built-in data quality expectations
+- Auto-optimization and performance tuning
+- Production-ready orchestration and monitoring
 
 ---
 
@@ -102,38 +108,58 @@ flowchart TD
 
 ### Bronze Layer (Raw Ingestion)
 
-* Data is pulled from multiple market data sources (e.g., Alpaca, Yahoo Finance, Alpha Vantage, etc.)
-* Raw records are ingested with minimal transformation
-* Metadata such as ingestion timestamp and data source are added
+* Data is pulled from Yahoo Finance using the `yfinance` library
+* Raw records are ingested with minimal transformation via **Auto Loader streaming**
+* Metadata such as ingestion timestamp and batch_id are added
 * Data is written append-only to Delta tables
+* **Table**: `main.bronze.bars`
+* **Key Fields**: `symbol`, `timestamp`, `batch_id` (composite key)
 
 ### Silver Layer (Cleaned & Normalized)
 
-* Schema enforcement and type casting
-* Deduplication based on symbol and timestamp
+* Schema enforcement and type casting (all OHLCV fields non-nullable)
+* Deduplication based on `symbol` and `timestamp` (keeps most recent)
+* Data quality validation and scoring
 * Standardized column names and data types
 * Idempotent processing using Delta MERGE operations
+* **Table**: `main.silver.bars`
+* **Key Fields**: `symbol`, `timestamp` (composite key)
+* **Quality Metrics**: `is_valid`, `quality_score`
 
 ### Gold Layer (Analytics & Aggregates)
 
-* Daily OHLCV aggregations per symbol
-* Simple technical indicators (e.g., moving averages, returns)
-* Analytics-ready tables optimized for querying and visualization
+#### Daily OHLCV Table
+* Aggregates intraday 5-minute bars to daily OHLCV per symbol
+* Calculates daily_return, price_range, avg_price
+* **Table**: `main.gold.daily_ohlcv`
+* **Key Fields**: `symbol`, `trade_date` (composite key)
+
+#### Analytics Table
+* Technical indicators: SMA 5, 20, 50-day moving averages
+* Volatility calculation (stddev of returns)
+* **Table**: `main.gold.analytics`
+* **Key Fields**: `symbol`, `trade_date` (composite key)
 
 ---
 
 ## Technology Stack
 
+### Databricks Native Technologies
+* **Delta Live Tables (DLT)**: Declarative ETL framework for medallion architecture
+* **Unity Catalog**: Modern data governance and catalog management
+* **Auto Loader**: Automatic file detection and schema evolution for streaming
+* **Delta Lake**: ACID transactions, time travel, and schema evolution
+* **Databricks Workflows**: Orchestration and scheduling
+* **Databricks Asset Bundles**: Infrastructure as code
+* **Photon Engine**: High-performance query engine (optional)
+* **Auto-optimization**: Automatic table optimization (Z-ordering, compaction)
+
+### Core Technologies
 * Python
-* Apache Spark
+* Apache Spark (Databricks Runtime)
 * Delta Lake
-* Databricks (Free Edition)
-* Multiple Market Data Sources:
-  * **Yahoo Finance** (✅ implemented, free, no API keys required)
-  * Alpaca Market Data API (optional, requires API keys, TODO)
-  * Alpha Vantage (free tier available, TODO)
-  * Other public/free market data APIs
-* REST-based ingestion using `requests`
+* Structured Streaming
+* **Yahoo Finance** (via `yfinance` library, free, no API keys required)
 * Web scraping for symbol lists using `beautifulsoup4` (S&P 500 symbols from stockanalysis.com)
 * Testing framework: `pytest` with comprehensive test coverage
 
@@ -159,8 +185,7 @@ databricks-market-data-poc/
 │   ├── data_sources/          # Data source clients
 │   │   ├── __init__.py
 │   │   ├── base_client.py     # Abstract base class for data sources
-│   │   ├── yahoo_finance.py   # Yahoo Finance REST API client (✅ implemented)
-│   │   └── alpaca_client.py   # Alpaca API client (optional, TODO)
+│   │   └── yahoo_finance.py   # Yahoo Finance client using yfinance library (✅ implemented)
 │   ├── config.py
 │   ├── schemas.py
 │   ├── transforms.py
@@ -234,7 +259,7 @@ External APIs (Yahoo Finance)
 **Key Features**:
 - **Spark JSON Reader**: Uses Spark's native JSON reader for efficient processing of large files (handles files of any size)
 - **Schema Enforcement**: Applies explicit Bronze schema with proper data types (timestamp, double, bigint)
-- **Metadata Addition**: Automatically adds ingestion metadata (data_source, ingestion_timestamp, batch_id)
+- **Metadata Addition**: Automatically adds ingestion metadata (ingestion_timestamp, batch_id)
 - **Idempotent MERGE**: Uses Delta Lake MERGE operations to prevent duplicates on re-runs
 - **Automatic Date Detection**: Finds most recent date directory or accepts date parameter
 - **Fallback Handling**: Falls back to Python JSON parsing if Spark reader fails (for edge cases)
@@ -336,11 +361,9 @@ Raw JSON files (landing zone)
 ### Source Code
 
 * `data_sources/`
-  Modular data source clients that can be easily extended:
-  * `base_client.py`: Abstract base class defining the interface for all data sources (✅ implemented)
-  * `yahoo_finance.py`: Yahoo Finance REST API client with retry logic and error handling (✅ implemented, fully tested)
-  * `alpaca_client.py`: Alpaca API client (optional, requires API keys, TODO)
-  * Additional data sources can be added by implementing the base client interface
+  Data source client implementation:
+  * `base_client.py`: Abstract base class defining the interface for data sources (✅ implemented)
+  * `yahoo_finance.py`: Yahoo Finance client using `yfinance` library with retry logic and error handling (✅ implemented, fully tested)
 
 * `schemas.py`
   Explicit Spark schemas used across ingestion and transformation layers
@@ -402,8 +425,7 @@ Although this is a demonstration project, basic quality checks are included:
 * API keys are not hardcoded
 * Credentials are expected to be provided via environment variables or notebook-scoped configuration
 * No secrets are committed to the repository
-* **The project can be used without any API keys** by defaulting to free data sources (e.g., Yahoo Finance)
-* Alpaca and other premium data sources are optional and only required if explicitly configured
+* **No API keys required**: The project uses Yahoo Finance which is free and requires no authentication
 
 ---
 
@@ -444,10 +466,9 @@ Although this is a demonstration project, basic quality checks are included:
      - Install packages from `requirements.txt` in your Databricks cluster
      - Note: PySpark and Delta Lake are typically pre-installed in Databricks
 
-3. **Configure data sources (optional):**
-   - By default, the project uses Yahoo Finance which requires no API keys
-   - To use Alpaca or other premium sources, set API credentials as environment variables or notebook parameters
-   - See `src/config.py` for data source configuration options
+3. **Data source configuration:**
+   - The project uses Yahoo Finance by default, which requires no API keys
+   - See `src/config.py` for rate limiting and retry configuration options
 
 4. **Run notebooks in order:**
    1. `00_setup.py` - Environment setup (run once)
@@ -476,10 +497,15 @@ This project showcases proficiency in:
 - **Schema Management**: Explicit schemas with type enforcement at each layer
 
 ### Databricks & Spark
-- **Delta Lake**: MERGE operations, schema evolution, time travel
-- **Spark DataFrames**: Efficient data processing with Spark SQL
+- **Delta Live Tables (DLT)**: Declarative ETL with automatic dependency management
+- **Delta Lake**: MERGE operations, schema evolution, time travel, auto-optimization
+- **Auto Loader**: Automatic file detection and streaming ingestion
 - **Unity Catalog**: Modern data governance and catalog management
-- **Job Orchestration**: Production-ready job scheduling and dependencies
+- **Structured Streaming**: Real-time data processing with exactly-once semantics
+- **Databricks Workflows**: Production-ready job orchestration and scheduling
+- **Databricks Asset Bundles**: Infrastructure as code for deployments
+- **Photon Engine**: High-performance query acceleration (optional)
+- **Auto-optimization**: Automatic Z-ordering and compaction
 
 ### Python Development
 - **Type Safety**: Strict type hints throughout codebase
@@ -528,7 +554,7 @@ It is not intended for live trading, real-time analytics, or production deployme
   - Spark-based JSON reading for large files
   - Explicit schema enforcement with proper data types
   - Delta Lake MERGE operations for idempotent processing
-  - Metadata enrichment (data_source, ingestion_timestamp, batch_id)
+  - Metadata enrichment (ingestion_timestamp, batch_id)
   - Unity Catalog and workspace file storage support
 
 * **Infrastructure**:
@@ -544,14 +570,43 @@ It is not intended for live trading, real-time analytics, or production deployme
   - Idempotent operations throughout
   - Configuration-driven design
 
+### ✅ Completed
+* **Silver Layer Transformations**:
+  - Schema enforcement and type casting
+  - Deduplication (keeps most recent by ingestion_timestamp)
+  - Data quality validation (price relationships, volume checks)
+  - Quality scoring algorithm (completeness, consistency, reasonableness)
+  - Valid/invalid record flagging
+  - Incremental processing support
+  - Idempotent Delta MERGE operations
+  
+* **Gold Layer Analytics**:
+  - Daily OHLCV aggregation from intraday bars
+  - Calculated metrics (daily_return, price_range, avg_price)
+  - Technical indicators (SMA 5, 20, 50-day moving averages)
+  - Volatility calculation (stddev of returns over 20-day window)
+  - Incremental processing with window function recalculation
+  - Idempotent Delta MERGE operations
+  
+* **Data Quality Checks Framework**:
+  - Bronze layer validation (nulls, ranges, completeness)
+  - Silver layer quality metrics (quality scores, validity checks)
+  - Gold layer consistency checks (indicator completeness, relationships)
+  - Cross-layer consistency validation (symbol and date range checks)
+  - Comprehensive quality reporting
+
+* **Transformation Functions** (`src/transforms.py`):
+  - `clean_bronze_to_silver()`: Complete Bronze to Silver transformation
+  - `aggregate_to_daily_ohlcv()`: Daily aggregation with metrics
+  - `calculate_technical_indicators()`: Technical indicator calculations
+  - Helper functions for incremental processing
+
 ### 🚧 In Progress / Planned
-* Silver layer transformations (deduplication, cleaning, normalization)
-* Gold layer analytics (daily aggregations, technical indicators)
-* Data quality checks framework
 * Databricks Jobs orchestration (can be configured manually)
+* Additional technical indicators (RSI, MACD, Bollinger Bands)
+* Performance optimizations (partitioning, z-ordering)
 
 ### 📋 Future Enhancements
-* Alpaca API client implementation
 * Structured Streaming for real-time ingestion
 * Advanced data quality frameworks (Great Expectations integration)
 * Secret scopes / key vault integration

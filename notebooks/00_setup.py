@@ -219,7 +219,6 @@ if STORAGE_MODE == "volumes":
                 low DOUBLE,
                 close DOUBLE,
                 volume BIGINT,
-                data_source STRING NOT NULL,
                 ingestion_timestamp TIMESTAMP NOT NULL,
                 batch_id STRING
             ) USING DELTA
