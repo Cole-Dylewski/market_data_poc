@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project is a **production-ready** data engineering pipeline that demonstrates how financial market data can be ingested from Yahoo Finance into Databricks using Apache Spark and Delta Lake. The pipeline showcases modern lakehouse design patterns, real-time streaming ingestion, and Spark-based analytical transformations using Databricks native technologies.
+This project is a lightweight tech demo data engineering pipeline that demonstrates how financial market data can be ingested from Yahoo Finance into Databricks using Apache Spark and Delta Lake. The pipeline showcases modern lakehouse design patterns, real-time streaming ingestion, and Spark-based analytical transformations using Databricks native technologies.
 
 The project uses Yahoo Finance as the sole data source, which requires no API keys and makes the repository easily cloneable and usable by anyone without requiring authentication or secrets.
 
